@@ -848,7 +848,10 @@ const DB={
   recorrentes:{V:[],Y:[]}, /* [{desc,cat,fixo,variavel,diaBase,lastApplied}] */
 };
 
-let curMonth=5,curYear=2026,curPerson='V',curFilter='TODOS';
+const _today=new Date();
+let curMonth=_today.getFullYear()===2026?_today.getMonth():5;
+let curYear=_today.getFullYear()>=2026?_today.getFullYear():2026;
+let curPerson='V',curFilter='TODOS';
 let editIdx=-1,editPerson='',editMetaMes='';
 let charts={};
 let SESSION={user:null}; /* 'V','Y','J' */
