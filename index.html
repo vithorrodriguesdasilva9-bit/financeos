@@ -177,6 +177,16 @@ function reRender(){
   updateRing();
 }
 
+/* ── Fetch a specific month's lançamentos fresh from Firestore ── */
+async function fbFetchMonth(key){
+  try {
+    const [vSnap,ySnap] = await Promise.all([getDoc(REF.lancV(key)),getDoc(REF.lancY(key))]);
+    DB.allData.V[key] = vSnap.exists() ? JSON.parse(vSnap.data().items||'[]') : [];
+    DB.allData.Y[key] = ySnap.exists() ? JSON.parse(ySnap.data().items||'[]') : [];
+  } catch(e){ console.error('fbFetchMonth',e); }
+}
+window.fbFetchMonth = fbFetchMonth;
+
 /* expose to global scope so inline onclick handlers work */
 window.fbSaveLanc = fbSaveLanc;
 window.fbSaveRendas = fbSaveRendas;
@@ -902,6 +912,8 @@ function initData(){
 /* Aplica lançamentos recorrentes no mês atual, uma única vez por mês */
 function applyRecurring(){
   const key=getKey();
+  const changedPerson={V:false,Y:false};
+  let recorrentesChanged=false;
   ['V','Y'].forEach(p=>{
     ensureArrays(key);
     (DB.recorrentes[p]||[]).forEach(rec=>{
@@ -911,10 +923,17 @@ function applyRecurring(){
       if(already) return;
       arr.push({data:'01/'+String(curMonth+1).padStart(2,'0'),desc:rec.desc,cat:rec.cat,fixo:rec.fixo,variavel:rec.variavel,_recId:rec.id});
       rec.lastApplied=key;
+      changedPerson[p]=true;
+      recorrentesChanged=true;
     });
   });
-  if(window.fbSaveRecorrentes) window.fbSaveRecorrentes();
-  if(window.fbSaveLanc){ window.fbSaveLanc('V',key); window.fbSaveLanc('Y',key); }
+  /* IMPORTANTE: só grava no Firestore se algo realmente mudou.
+     Gravar sempre (mesmo sem mudança) corre o risco de sobrescrever dados
+     reais com um array vazio caso os dados ainda não tenham sido
+     totalmente carregados da nuvem neste momento. */
+  if(recorrentesChanged && window.fbSaveRecorrentes) window.fbSaveRecorrentes();
+  if(changedPerson.V && window.fbSaveLanc) window.fbSaveLanc('V',key);
+  if(changedPerson.Y && window.fbSaveLanc) window.fbSaveLanc('Y',key);
 }
 
 /* ═══════════════ PIN FLOW ═══════════════ */
@@ -1040,7 +1059,7 @@ function showSyncOverlay(v){
   el.style.display=v?'flex':'none';
 }
 
-function changeMonth(dir){
+async function changeMonth(dir){
   curMonth+=dir;
   if(curMonth>11){curMonth=0;curYear++;}
   if(curMonth<0){curMonth=11;curYear--;}
@@ -1048,7 +1067,9 @@ function changeMonth(dir){
   if(!DB.rendas[getKey()])DB.rendas[getKey()]={V:DB.rendas[mkKey(pm,py)]?.V||0,Y:DB.rendas[mkKey(pm,py)]?.Y||0};
   updateHeader();
   const cur=document.querySelector('.page.on');
-  /* reload lancamentos for new month from Firebase */
+  /* busca os dados reais do novo mês ANTES de aplicar recorrência,
+     pra nunca correr o risco de agir sobre um array local vazio */
+  if(window.fbFetchMonth) await window.fbFetchMonth(getKey());
   if(window.startRealtimeListeners) window.startRealtimeListeners();
   applyRecurring();
   nav(cur?cur.id.replace('page-',''):'home');
