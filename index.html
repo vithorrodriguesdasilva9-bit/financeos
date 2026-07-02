@@ -34,6 +34,7 @@ const REF = {
   meta:      ()=>doc(db,'financeos','metaData'),
   orcamentos:()=>doc(db,'financeos','orcamentos'),
   recorrentes:()=>doc(db,'financeos','recorrentes'),
+  metaGoal:  ()=>doc(db,'financeos','metaGoal'),
 };
 
 /* ── Save helpers ── */
@@ -68,6 +69,11 @@ async function fbSaveRecorrentes(){
     await setDoc(REF.recorrentes(), {data: JSON.stringify(DB.recorrentes)});
   } catch(e){ console.error('fbSaveRecorrentes',e); }
 }
+async function fbSaveMetaGoal(){
+  try {
+    await setDoc(REF.metaGoal(), {value: window.META_AP});
+  } catch(e){ console.error('fbSaveMetaGoal',e); }
+}
 
 /* ── Load initial data from Firestore ── */
 async function fbLoad(){
@@ -86,6 +92,11 @@ async function fbLoad(){
     /* meta */
     const metaSnap = await getDoc(REF.meta());
     if(metaSnap.exists()) DB.metaData = JSON.parse(metaSnap.data().data||'{}');
+
+    /* meta goal (valor total da meta, editável) */
+    const metaGoalSnap = await getDoc(REF.metaGoal());
+    if(metaGoalSnap.exists() && metaGoalSnap.data().value){ window.META_AP = metaGoalSnap.data().value; }
+    else { await fbSaveMetaGoal(); } /* primeira vez — salva o valor padrão */
 
     /* orcamentos */
     const orcSnap = await getDoc(REF.orcamentos());
@@ -164,6 +175,10 @@ function startRealtimeListeners(){
   unsubscribers.push(onSnapshot(REF.recorrentes(), snap=>{
     if(snap.exists()) DB.recorrentes=JSON.parse(snap.data().data||'{"V":[],"Y":[]}');
   }));
+  /* meta goal */
+  unsubscribers.push(onSnapshot(REF.metaGoal(), snap=>{
+    if(snap.exists() && snap.data().value){ window.META_AP=snap.data().value; reRender(); }
+  }));
 }
 
 function reRender(){
@@ -194,6 +209,7 @@ window.fbSaveMeta = fbSaveMeta;
 window.fbSaveConfig = fbSaveConfig;
 window.fbSaveOrcamentos = fbSaveOrcamentos;
 window.fbSaveRecorrentes = fbSaveRecorrentes;
+window.fbSaveMetaGoal = fbSaveMetaGoal;
 window.fbLoad = fbLoad;
 window.startRealtimeListeners = startRealtimeListeners;
 window.fbReady = true;
@@ -733,7 +749,10 @@ html,body{background:var(--bg);color:var(--t0);font-family:'Inter',sans-serif;he
           <div class="hero-line" style="background:linear-gradient(90deg,transparent,var(--em)40,transparent)"></div>
         </div>
         <div class="sgrid">
-          <div class="scard"><div class="sc-lbl">Meta total</div><div class="sc-val c" id="m-meta">—</div><div class="sc-bar c"></div></div>
+          <div class="scard" onclick="openMetaGoalModal()" style="cursor:pointer">
+            <div class="sc-lbl">Meta total <i class="ti ti-pencil" style="font-size:10px;color:var(--cyan);margin-left:3px"></i></div>
+            <div class="sc-val c" id="m-meta">—</div><div class="sc-bar c"></div>
+          </div>
           <div class="scard"><div class="sc-lbl">Faltam</div><div class="sc-val r" id="m-falta">—</div><div class="sc-bar r"></div></div>
           <div class="scard"><div class="sc-lbl">Vithor total</div><div class="sc-val V" id="m-vtotal">—</div><div class="sc-bar V"></div></div>
           <div class="scard"><div class="sc-lbl">Yngrid total</div><div class="sc-val Y" id="m-ytotal">—</div><div class="sc-bar Y"></div></div>
@@ -837,6 +856,14 @@ html,body{background:var(--bg);color:var(--t0);font-family:'Inter',sans-serif;he
     </div>
   </div>
 
+  <div class="modal-bg" id="metaGoalModal">
+    <div class="modal">
+      <div class="modal-title">Editar meta do apartamento<button class="modal-close" onclick="closeModal('metaGoalModal')"><i class="ti ti-x"></i></button></div>
+      <div class="fgrid full"><div><label class="flbl">Novo valor da meta (R$)</label><input class="finput" id="mg-val" type="number" inputmode="decimal" placeholder="10000"></div></div>
+      <button class="btn primary" onclick="saveMetaGoal()"><i class="ti ti-check"></i>Salvar nova meta</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <!-- SYNC OVERLAY -->
@@ -860,7 +887,7 @@ const cc=c=>CATS[c]||CATS.DEFAULT;
 const fmt=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtk=v=>v>=1000?'R$'+(v/1000).toFixed(1)+'k':'R$'+Math.round(v);
 const pct=(a,b)=>b?(a/b*100).toFixed(1)+'%':'0%';
-const META_AP=10000;
+var META_AP=10000; /* editável — carregado do Firestore em fbLoad() */
 
 /* ═══ Animação de contador (dados "se movendo") ═══ */
 const _animState=new WeakMap();
@@ -1524,6 +1551,20 @@ function renderMeta(){
     </div>`;
   }).join('');
   drawMetaChart(accum);updateRing();
+}
+function openMetaGoalModal(){
+  if(SESSION.user==='J'){toast('Somente leitura no painel conjunto','err');return;}
+  document.getElementById('mg-val').value=window.META_AP||META_AP;
+  document.getElementById('metaGoalModal').classList.add('open');
+}
+function saveMetaGoal(){
+  const v=parseFloat(document.getElementById('mg-val').value)||0;
+  if(v<=0){toast('Informe um valor válido','err');return;}
+  window.META_AP=v; META_AP=v;
+  closeModal('metaGoalModal');
+  renderMeta();renderHome();renderAnalise();
+  toast('Meta atualizada para '+fmt(v),'ok');
+  if(window.fbSaveMetaGoal) window.fbSaveMetaGoal();
 }
 function openMetaTile(key,mes){
   if(SESSION.user==='J'){toast('Somente leitura no painel conjunto','err');return;}
