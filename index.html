@@ -520,6 +520,16 @@ html,body{background:var(--bg);color:var(--t0);font-family:'Inter',sans-serif;he
 /* ═══ READ-ONLY MODE ═══ */
 .readonly-notice{background:var(--amber)10;border:1px solid var(--amber)22;border-radius:var(--r2);padding:9px 13px;margin-bottom:10px;font-size:11px;color:var(--amber);display:flex;align-items:center;gap:7px}
 
+/* ═══ REMINDER BANNER ═══ */
+.reminder-banner{background:var(--cyan)0d;border:1px solid var(--cyan)25;border-radius:var(--r2);padding:11px 13px;margin-bottom:10px;font-size:11px;color:var(--cyan);display:flex;align-items:center;gap:9px}
+.reminder-banner span{flex:1;color:var(--t0)}
+.reminder-close{background:none;border:none;cursor:pointer;color:var(--t2);font-size:15px;padding:2px;line-height:1;flex-shrink:0}
+
+/* ═══ SWIPE HINT ═══ */
+.swipe-hint{position:fixed;top:50%;transform:translateY(-50%);z-index:60;pointer-events:none;opacity:0;transition:opacity .2s;font-size:22px;color:var(--cyan)}
+.swipe-hint.left{left:8px}.swipe-hint.right{right:8px}
+.swipe-hint.show{opacity:.7}
+
 /* ═══ STREAK BADGE ═══ */
 .streak-badge{display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,var(--s1),var(--s2));border:1px solid var(--amber)25;border-radius:var(--r3);padding:14px 16px;margin-bottom:10px}
 .streak-ico{font-size:26px;flex-shrink:0}
@@ -647,6 +657,7 @@ html,body{background:var(--bg);color:var(--t0);font-family:'Inter',sans-serif;he
 
       <!-- ── HOME ── -->
       <div id="page-home" class="page on">
+        <div id="reminder-home"></div>
         <div id="joint-banner-home"></div>
         <div id="streak-home"></div>
         <div class="hero">
@@ -703,7 +714,7 @@ html,body{background:var(--bg);color:var(--t0);font-family:'Inter',sans-serif;he
         <div id="add-form-wrap">
           <div class="divlabel">NOVO LANÇAMENTO</div>
           <div class="form-card">
-            <div class="fgrid"><div><label class="flbl">Descrição</label><input class="finput" id="f-desc" type="text" placeholder="Ex: Mercado"></div><div><label class="flbl">Categoria</label><input class="finput" id="f-cat" type="text" placeholder="Ex: Alimentação"></div></div>
+            <div class="fgrid"><div><label class="flbl">Descrição</label><input class="finput" id="f-desc" type="text" placeholder="Ex: Mercado" onblur="autoFillCategory('f-desc','f-cat')"></div><div><label class="flbl">Categoria</label><input class="finput" id="f-cat" type="text" placeholder="Ex: Alimentação"></div></div>
             <div class="fgrid"><div><label class="flbl">Fixo (R$)</label><input class="finput" id="f-fixo" type="number" placeholder="0,00" inputmode="decimal"></div><div><label class="flbl">Variável (R$)</label><input class="finput" id="f-var" type="number" placeholder="0,00" inputmode="decimal"></div></div>
             <div class="fgrid full"><div><label class="flbl">Data (dd/mm)</label><input class="finput" id="f-data" type="text" placeholder="dd/mm"></div></div>
             <label class="fcheck"><input type="checkbox" id="f-recorrente"><span>Repetir automaticamente todo mês (ex: aluguel, internet)</span></label>
@@ -759,11 +770,14 @@ html,body{background:var(--bg);color:var(--t0);font-family:'Inter',sans-serif;he
         <div class="card" id="an-cats"></div>
         <div class="sec">Projeção meta AP</div>
         <div class="card" id="an-proj"></div>
+        <div class="sec">Fluxo de caixa · últimos 6 meses</div>
+        <div class="card"><div class="chart-wrap" style="height:190px"><canvas id="cashFlowChart"></canvas></div></div>
         <div class="sec">Evolução acumulada</div>
         <div class="card"><div class="chart-wrap" style="height:200px"><canvas id="lineChart"></canvas></div></div>
         <div class="sec">Projeção futura</div>
         <div class="card" id="an-future"></div>
         <button class="btn violet" onclick="exportPDF()" style="margin-top:6px"><i class="ti ti-file-download"></i>Exportar relatório PDF do mês</button>
+        <button class="btn outline" onclick="exportCSV()" style="margin-top:8px"><i class="ti ti-file-spreadsheet"></i>Exportar dados em CSV/Excel</button>
       </div>
 
     </div>
@@ -847,6 +861,24 @@ const fmt=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,max
 const fmtk=v=>v>=1000?'R$'+(v/1000).toFixed(1)+'k':'R$'+Math.round(v);
 const pct=(a,b)=>b?(a/b*100).toFixed(1)+'%':'0%';
 const META_AP=10000;
+
+/* ═══ Animação de contador (dados "se movendo") ═══ */
+const _animState=new WeakMap();
+function animateNumber(el,endVal,duration=650){
+  if(!el)return;
+  const startVal=_animState.get(el)??0;
+  const startTime=performance.now();
+  _animState.set(el,endVal);
+  function step(now){
+    const t=Math.min((now-startTime)/duration,1);
+    const eased=1-Math.pow(1-t,3); /* ease-out cubic */
+    const cur=startVal+(endVal-startVal)*eased;
+    el.textContent=fmt(cur);
+    if(t<1) requestAnimationFrame(step);
+    else el.textContent=fmt(endVal);
+  }
+  requestAnimationFrame(step);
+}
 
 /* shared data store — both users write here */
 const DB={
@@ -934,6 +966,32 @@ function applyRecurring(){
   if(recorrentesChanged && window.fbSaveRecorrentes) window.fbSaveRecorrentes();
   if(changedPerson.V && window.fbSaveLanc) window.fbSaveLanc('V',key);
   if(changedPerson.Y && window.fbSaveLanc) window.fbSaveLanc('Y',key);
+}
+
+/* ═══════════════ CATEGORIZAÇÃO AUTOMÁTICA ═══════════════ */
+/* Mapa de palavras-chave → categoria. Aplica só quando o campo categoria
+   ainda está vazio, pra nunca sobrescrever uma escolha manual do usuário. */
+const AUTO_CAT_RULES=[
+  [/mercado|supermercado|hortifruti|feira|açougue|padaria/i,'ALIMENTAÇÃO'],
+  [/ifood|restaurante|lanche|almoço|jantar|delivery|pizza|hamburguer/i,'ALIMENTAÇÃO'],
+  [/uber|99|taxi|gasolina|combustível|estacionamento|pedágio|ônibus|metrô/i,'TRANSPORTE'],
+  [/farmácia|remédio|médico|consulta|exame|fisioterapia|dentista|plano de saúde/i,'SAÚDE'],
+  [/aluguel|condomínio|internet|luz|energia|água|gás|iptu/i,'CASA'],
+  [/cinema|show|festa|balada|jogo|streaming|netflix|spotify/i,'LAZER'],
+  [/curso|faculdade|livro|mensalidade|semestre|matrícula/i,'EDUCAÇÃO'],
+  [/roupa|salão|cabelo|barbearia|manicure|perfume/i,'PESSOAL'],
+];
+function guessCategory(desc){
+  if(!desc)return '';
+  for(const [rx,cat] of AUTO_CAT_RULES){ if(rx.test(desc)) return cat; }
+  return '';
+}
+function autoFillCategory(descInputId,catInputId){
+  const descEl=document.getElementById(descInputId),catEl=document.getElementById(catInputId);
+  if(!descEl||!catEl)return;
+  if(catEl.value.trim())return; /* já tem categoria escolhida manualmente, não mexe */
+  const guess=guessCategory(descEl.value);
+  if(guess){ catEl.value=guess; catEl.placeholder=guess; }
 }
 
 /* ═══════════════ PIN FLOW ═══════════════ */
@@ -1096,6 +1154,40 @@ function updateRing(){
   document.getElementById('top-pct').textContent=pp.toFixed(0)+'%';
 }
 
+/* ═══════════════ LEMBRETE DIÁRIO (LOCAL, SEM SERVIDOR) ═══════════════ */
+/* Guarda no localStorage do próprio aparelho — não depende de infra extra.
+   Se o usuário logado ainda não lançou nada hoje e ainda não dispensou
+   o aviso hoje, mostra um lembrete gentil na Home. */
+function todayDDMM(){
+  const d=new Date();
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');
+}
+function reminderDismissKey(){
+  const d=new Date();
+  return 'financeos_reminder_dismissed_'+SESSION.user+'_'+d.toISOString().slice(0,10);
+}
+function renderReminder(){
+  const el=document.getElementById('reminder-home');
+  if(!el)return;
+  const u=SESSION.user;
+  if(u==='J'){el.innerHTML='';return;} /* painel conjunto não lança gastos */
+  try{ if(localStorage.getItem(reminderDismissKey())){el.innerHTML='';return;} }catch(e){}
+  const today=todayDDMM();
+  const data=u==='V'?getVData():getYData();
+  const lancouHoje=data.some(x=>x.data===today);
+  if(lancouHoje){el.innerHTML='';return;}
+  el.innerHTML=`<div class="reminder-banner">
+    <i class="ti ti-bell-ringing"></i>
+    <span>Você ainda não lançou nenhum gasto hoje. Não esquece!</span>
+    <button class="reminder-close" onclick="dismissReminder()"><i class="ti ti-x"></i></button>
+  </div>`;
+}
+function dismissReminder(){
+  try{ localStorage.setItem(reminderDismissKey(),'1'); }catch(e){}
+  const el=document.getElementById('reminder-home');
+  if(el)el.innerHTML='';
+}
+
 /* ═══════════════ STREAK (GAMIFICAÇÃO) ═══════════════ */
 /* Conta quantos meses consecutivos (terminando no mês anterior ao atual, ou no atual se já fechado)
    o total gasto ficou dentro do orçamento (renda >= gastos) */
@@ -1194,13 +1286,13 @@ function renderHome(){
   const heroGastos=isJoint?gastos:u==='V'?vT:yT;
   const heroSaldo=heroRenda-heroGastos;
 
-  document.getElementById('h-renda').textContent=fmt(heroRenda);
+  animateNumber(document.getElementById('h-renda'),heroRenda);
   document.getElementById('h-sub').textContent=isJoint?'Vithor '+fmt(vR)+' · Yngrid '+fmt(yR):heroRenda>0?'Renda do mês':'Sem renda cadastrada';
   document.getElementById('h-gastos').textContent=fmt(heroGastos);
   document.getElementById('h-saldo').textContent=fmt(heroSaldo);
   document.getElementById('h-pgasto').textContent=pct(heroGastos,heroRenda);
   document.getElementById('h-ap').textContent=fmt(mesAP);
-  document.getElementById('h-acum').textContent=fmt(at);
+  animateNumber(document.getElementById('h-acum'),at);
   document.getElementById('h-meta-val').textContent=fmt(META_AP);
   document.getElementById('h-prog').style.width=Math.min(pp,100)+'%';
   document.getElementById('h-ppct').textContent=pp+'% atingido';
@@ -1214,6 +1306,8 @@ function renderHome(){
 
   /* streak badge */
   renderStreak();
+  /* lembrete diário */
+  renderReminder();
 
   /* trend */
   const pk=mkKey(curMonth-1<0?11:curMonth-1,curMonth-1<0?curYear-1:curYear);
@@ -1365,6 +1459,7 @@ function addLanc(){
   /* add to logged-in user's data */
   (DB.allData[u][key]).push(item);
   ['f-desc','f-cat','f-fixo','f-var','f-data'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  const fcatEl=document.getElementById('f-cat'); if(fcatEl) fcatEl.placeholder='Ex: Alimentação';
   document.getElementById('f-recorrente').checked=false;
   renderLancamentos();renderHome();toast(isRec?'Lançamento recorrente criado':'Lançamento adicionado','ok');
   if(window.fbSaveLanc) window.fbSaveLanc(u, getKey());
@@ -1472,6 +1567,39 @@ function drawMetaChart(accum){
   charts.mb=new Chart(ctx,{type:'bar',data:{labels:accum.map(x=>MSHORT[parseInt(x.key.split('-')[1])-1]),datasets:[{label:'Vithor',data:accum.map(x=>x.vithor),backgroundColor:'rgba(255,159,67,.65)',borderRadius:5,borderSkipped:false},{label:'Yngrid',data:accum.map(x=>x.yngrid),backgroundColor:'rgba(181,123,238,.65)',borderRadius:5,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#5f6882',font:{size:10},boxWidth:10,padding:12}}},scales:{x:{ticks:{color:'#5f6882',font:{size:10}},grid:{display:false}},y:{ticks:{callback:v=>'R$'+(v/1000).toFixed(0)+'k',color:'#5f6882',font:{size:10}},grid:{color:'rgba(255,255,255,.05)'}}}}});
 }
 
+/* ═══════════════ FLUXO DE CAIXA (GRÁFICO ANIMADO) ═══════════════ */
+function drawCashFlowChart(){
+  if(charts.cf){charts.cf.destroy();delete charts.cf;}
+  const ctx=document.getElementById('cashFlowChart');if(!ctx)return;
+  const labels=[],rendaArr=[],gastoArr=[];
+  for(let i=5;i>=0;i--){
+    const mi=((curMonth-i)+120)%12, yi=curYear+Math.floor((curMonth-i)/12);
+    const key=mkKey(mi,yi);
+    const r=DB.rendas[key]||{V:0,Y:0};
+    const vd=DB.allData.V[key]||[],yd=DB.allData.Y[key]||[];
+    const gasto=vd.reduce((a,x)=>a+x.fixo+x.variavel,0)+yd.reduce((a,x)=>a+x.fixo+x.variavel,0);
+    labels.push(MSHORT[mi]);
+    rendaArr.push((r.V||0)+(r.Y||0));
+    gastoArr.push(gasto);
+  }
+  charts.cf=new Chart(ctx,{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Renda',data:rendaArr,borderColor:'#4fffb0',backgroundColor:'#4fffb022',fill:true,tension:.4,pointRadius:3,pointBackgroundColor:'#4fffb0',borderWidth:2},
+      {label:'Gastos',data:gastoArr,borderColor:'#ff4b6e',backgroundColor:'#ff4b6e18',fill:true,tension:.4,pointRadius:3,pointBackgroundColor:'#ff4b6e',borderWidth:2},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      animation:{duration:900,easing:'easeOutCubic'},
+      plugins:{legend:{labels:{color:'#5f6882',font:{size:10},boxWidth:10,padding:12}}},
+      scales:{
+        x:{ticks:{color:'#5f6882',font:{size:10}},grid:{display:false}},
+        y:{ticks:{callback:v=>'R$'+(v/1000).toFixed(1)+'k',color:'#5f6882',font:{size:10}},grid:{color:'rgba(255,255,255,.05)'}}
+      }
+    }
+  });
+}
+
 /* ═══════════════ ANÁLISE ═══════════════ */
 function renderAnalise(){
   document.getElementById('an-mes-label').textContent=MONTHS[curMonth]+' '+curYear;
@@ -1537,6 +1665,7 @@ function renderAnalise(){
     ?`<div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--t2);letter-spacing:.1em;margin-bottom:12px">PROJEÇÃO · ${fmt(avg)}/MÊS</div>`
       +spks.map(f=>`<div class="barrow"><div class="br-lbl">${f.m}</div><div class="br-track"><div class="br-fill" style="width:${f.p.toFixed(1)}%;background:linear-gradient(90deg,var(--violet),var(--cyan));box-shadow:0 0 6px var(--cyan)33"></div></div><div class="br-val">${fmtk(f.v)}</div></div>`).join('')
     :'<div class="empty-st" style="padding:14px">Registre contribuições para projetar</div>';
+  drawCashFlowChart();
   if(charts.lc){charts.lc.destroy();delete charts.lc;}
   const ctx2=document.getElementById('lineChart');if(!ctx2)return;
   const futMs=MSHORT.filter((_,i)=>i>curMonth);let last=at;
@@ -1630,6 +1759,39 @@ function exportPDF(){
   }
 }
 
+/* ═══════════════ EXPORTAR CSV/EXCEL ═══════════════ */
+function exportCSV(){
+  try{
+    const vD=getVData(),yD=getYData();
+    const allItems=[...vD.map(x=>({...x,pessoa:'Vithor'})),...yD.map(x=>({...x,pessoa:'Yngrid'}))];
+    const header=['Data','Pessoa','Descrição','Categoria','Fixo','Variável','Total','Recorrente'];
+    const rows=allItems.map(it=>[
+      it.data, it.pessoa, it.desc, it.cat||'',
+      (it.fixo||0).toFixed(2).replace('.',','),
+      (it.variavel||0).toFixed(2).replace('.',','),
+      ((it.fixo||0)+(it.variavel||0)).toFixed(2).replace('.',','),
+      it._recId?'Sim':'Não'
+    ]);
+    const escapeCsv=v=>{
+      const s=String(v??'');
+      return /[;"\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+    };
+    const lines=[header,...rows].map(r=>r.map(escapeCsv).join(';'));
+    /* BOM pra Excel abrir acentos corretamente */
+    const csvContent='\uFEFF'+lines.join('\r\n');
+    const blob=new Blob([csvContent],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='FinanceOS_'+MSHORT[curMonth]+'_'+curYear+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('CSV exportado com sucesso','ok');
+  }catch(e){
+    console.error('exportCSV',e);
+    toast('Erro ao exportar CSV','err');
+  }
+}
+
 /* ═══════════════ RENDA MODAL ═══════════════ */
 function openRendaModal(){
   if(SESSION.user==='J'){toast('Somente leitura','err');return;}
@@ -1666,8 +1828,28 @@ function openChangePinModal(){document.getElementById('changePinModal').classLis
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.modal-bg').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)closeModal(el.id);}));
 
+/* ═══════════════ SWIPE ENTRE MESES ═══════════════ */
+function setupSwipe(){
+  const pages=document.querySelector('.pages');
+  if(!pages)return;
+  let startX=0,startY=0,tracking=false;
+  pages.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1)return;
+    startX=e.touches[0].clientX; startY=e.touches[0].clientY; tracking=true;
+  },{passive:true});
+  pages.addEventListener('touchend',e=>{
+    if(!tracking)return; tracking=false;
+    const dx=e.changedTouches[0].clientX-startX;
+    const dy=e.changedTouches[0].clientY-startY;
+    if(Math.abs(dx)>70 && Math.abs(dx)>Math.abs(dy)*1.6){
+      if(dx<0) changeMonth(1); else changeMonth(-1);
+    }
+  },{passive:true});
+}
+
 /* ═══════════════ BOOT ═══════════════ */
 initData(); /* seed defaults */
+setupSwipe(); /* habilita trocar de mês arrastando a tela */
 /* wait for firebase module to expose fbLoad */
 function waitFirebase(){
   if(window.fbLoad){ window.fbLoad(); }
